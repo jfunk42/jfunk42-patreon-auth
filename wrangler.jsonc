@@ -9,11 +9,17 @@
 	"vars": {
 		"PUBLIC_SITE_ORIGIN": "https://jfunk42.com"
 	},
+	"routes": [
+		{
+			"pattern": "api.jfunk42.com",
+			"custom_domain": true
+		}
+	],
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "jfunk42-patreon-auth",
-			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"database_id": "b2565b99-cb10-49cf-b7b4-a6f45acac5cc",
 			"migrations_dir": "migrations"
 		}
 	]
