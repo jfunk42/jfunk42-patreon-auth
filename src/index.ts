@@ -26,13 +26,20 @@ interface PatreonIdentityResponse {
 
 interface Session {
 	expiresAt: number;
+	patreonUserHash: string;
 	tier: string | null;
 }
 
 const encoder = new TextEncoder();
+const eulerTestIntervalSeconds = 60 * 60;
 const stateLifetimeSeconds = 10 * 60;
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
 const sessionCookieName = "__Host-jfunk42-patreon-session";
+const featureIds = new Set([
+	"math-performance-tracking",
+	"math-master-path",
+	"podcast-member-alpha",
+]);
 
 class HttpError extends Error {
 	constructor(
@@ -136,6 +143,16 @@ function callbackUrl(request: Request): string {
 	return new URL("/auth/patreon/callback", request.url).toString();
 }
 
+function publicTierName(tier: string): string {
+	if (/^8(?:-vote)?(?:\s+tier)?$/i.test(tier.trim())) {
+		return "The Ultimate Answer tier";
+	}
+	if (/^13(?:-vote)?(?:\s+tier)?$/i.test(tier.trim())) {
+		return "The Inverse Fine-structure Constant tier";
+	}
+	return tier.trim();
+}
+
 function getMappedTier(identity: PatreonIdentityResponse, tierMapJson?: string): string | null {
 	if (!tierMapJson) {
 		return null;
@@ -161,7 +178,7 @@ function getMappedTier(identity: PatreonIdentityResponse, tierMapJson?: string):
 		const tiers = member?.relationships?.currently_entitled_tiers?.data || [];
 		for (const tier of tiers) {
 			if (typeof tierMap[tier.id] === "string" && tierMap[tier.id].trim()) {
-				return tierMap[tier.id].trim();
+				return publicTierName(tierMap[tier.id]);
 			}
 		}
 	}
@@ -280,15 +297,19 @@ async function getSession(request: Request, env: Env): Promise<Session | null> {
 	}
 
 	const session = await env.DB.prepare(
-		"SELECT membership_tier, expires_at FROM sessions WHERE session_hash = ? AND expires_at > ?",
+		"SELECT patreon_user_hash, membership_tier, expires_at FROM sessions WHERE session_hash = ? AND expires_at > ?",
 	)
 		.bind(await hmac(token, env.AUTH_HASH_KEY), nowInSeconds())
-		.first<{ membership_tier: string | null; expires_at: number }>();
+		.first<{ patreon_user_hash: string; membership_tier: string | null; expires_at: number }>();
 	if (!session) {
 		return null;
 	}
 
-	return { expiresAt: session.expires_at, tier: session.membership_tier };
+	return {
+		expiresAt: session.expires_at,
+		patreonUserHash: session.patreon_user_hash,
+		tier: session.membership_tier ? publicTierName(session.membership_tier) : null,
+	};
 }
 
 async function handleSession(request: Request, env: Env): Promise<Response> {
@@ -321,6 +342,98 @@ function methodNotAllowed(request: Request): Response {
 	return json(request, { error: "Method not allowed." }, 405);
 }
 
+function isEulerTier(tier: string | null): boolean {
+	return /^euler(?:\s+tier)?$/i.test(tier?.trim() || "");
+}
+
+function requireSiteOrigin(request: Request): void {
+	if (request.headers.get("Origin") !== "https://jfunk42.com") {
+		throw new HttpError(403, "Requests must originate from jfunk42.com.");
+	}
+}
+
+async function requestJson(request: Request): Promise<Record<string, unknown>> {
+	const contentType = request.headers.get("Content-Type") || "";
+	if (!contentType.toLowerCase().startsWith("application/json")) {
+		throw new HttpError(415, "Requests must use JSON.");
+	}
+
+	try {
+		const body = await request.json();
+		if (!body || Array.isArray(body) || typeof body !== "object") {
+			throw new HttpError(400, "Request body must be an object.");
+		}
+		return body as Record<string, unknown>;
+	} catch (error) {
+		if (error instanceof HttpError) {
+			throw error;
+		}
+		throw new HttpError(400, "Request body must be valid JSON.");
+	}
+}
+
+async function getEulerTestSession(request: Request, env: Env): Promise<Session> {
+	requireSiteOrigin(request);
+	const session = await getSession(request, env);
+	if (!session) {
+		throw new HttpError(401, "Log in with Patreon to use Euler testing.");
+	}
+	if (!isEulerTier(session.tier)) {
+		throw new HttpError(403, "Euler testing is available to the Euler tier only.");
+	}
+	return session;
+}
+
+async function enforceEulerTestInterval(
+	env: Env,
+	action: "vote" | "suggestion",
+	patreonUserHash: string,
+): Promise<void> {
+	const now = nowInSeconds();
+	const result = await env.DB.prepare(
+		`INSERT INTO euler_test_limits (patreon_user_hash, action, last_used_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(patreon_user_hash, action) DO UPDATE SET last_used_at = excluded.last_used_at
+		 WHERE euler_test_limits.last_used_at <= ?`,
+	)
+		.bind(patreonUserHash, action, now, now - eulerTestIntervalSeconds)
+		.run();
+	if (result.meta.changes !== 1) {
+		throw new HttpError(429, "Try again in one hour.");
+	}
+}
+
+async function handleFeatureVote(request: Request, env: Env): Promise<Response> {
+	const session = await getEulerTestSession(request, env);
+	const body = await requestJson(request);
+	const featureId = typeof body.featureId === "string" ? body.featureId : "";
+	const direction = body.direction;
+	if (!featureIds.has(featureId) || (direction !== "up" && direction !== "down")) {
+		throw new HttpError(400, "Feature or vote direction is invalid.");
+	}
+
+	await enforceEulerTestInterval(env, "vote", session.patreonUserHash);
+	await env.DB.prepare(
+		"INSERT INTO feature_votes (patreon_user_hash, feature_id, direction, created_at) VALUES (?, ?, ?, ?)",
+	).bind(session.patreonUserHash, featureId, direction, nowInSeconds()).run();
+	return json(request, { accepted: true });
+}
+
+async function handleFeatureSuggestion(request: Request, env: Env): Promise<Response> {
+	const session = await getEulerTestSession(request, env);
+	const body = await requestJson(request);
+	const suggestion = typeof body.suggestion === "string" ? body.suggestion.trim() : "";
+	if (!suggestion || suggestion.length > 2000) {
+		throw new HttpError(400, "Feature requests must be between 1 and 2,000 characters.");
+	}
+
+	await enforceEulerTestInterval(env, "suggestion", session.patreonUserHash);
+	await env.DB.prepare(
+		"INSERT INTO feature_suggestions (patreon_user_hash, suggestion, created_at) VALUES (?, ?, ?)",
+	).bind(session.patreonUserHash, suggestion, nowInSeconds()).run();
+	return json(request, { accepted: true });
+}
+
 export default {
 	async fetch(request, env): Promise<Response> {
 		const url = new URL(request.url);
@@ -346,6 +459,12 @@ export default {
 			}
 			if (url.pathname === "/api/logout") {
 				return request.method === "POST" ? handleLogout(request, env) : methodNotAllowed(request);
+			}
+			if (url.pathname === "/api/feature-votes") {
+				return request.method === "POST" ? handleFeatureVote(request, env) : methodNotAllowed(request);
+			}
+			if (url.pathname === "/api/feature-suggestions") {
+				return request.method === "POST" ? handleFeatureSuggestion(request, env) : methodNotAllowed(request);
 			}
 			return json(request, { error: "Not found." }, 404);
 		} catch (error) {
