@@ -33,6 +33,23 @@ describe("Patreon authentication worker", () => {
 		expect(await response.json()).toEqual({ authenticated: false });
 	});
 
+	it("reserves temporary feature testing for an authenticated Pi session", async () => {
+		const response = await SELF.fetch("https://api.jfunk42.com/api/feature-votes", {
+			body: JSON.stringify({
+				direction: "up",
+				featureId: "math-master-path",
+			}),
+			headers: {
+				"Content-Type": "application/json",
+				Origin: "https://jfunk42.com",
+			},
+			method: "POST",
+		});
+
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: "Log in with Patreon to use Pi testing." });
+	});
+
 	it("rejects non-API routes", async () => {
 		const response = await SELF.fetch("https://api.jfunk42.com/unrecognized");
 

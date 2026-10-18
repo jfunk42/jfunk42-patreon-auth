@@ -31,7 +31,7 @@ interface Session {
 }
 
 const encoder = new TextEncoder();
-const eulerTestIntervalSeconds = 60 * 60;
+const piTestIntervalSeconds = 60 * 60;
 const stateLifetimeSeconds = 10 * 60;
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60;
 const sessionCookieName = "__Host-jfunk42-patreon-session";
@@ -342,8 +342,8 @@ function methodNotAllowed(request: Request): Response {
 	return json(request, { error: "Method not allowed." }, 405);
 }
 
-function isEulerTier(tier: string | null): boolean {
-	return /^euler(?:\s+tier)?$/i.test(tier?.trim() || "");
+function isPiTier(tier: string | null): boolean {
+	return /^pi(?:\s+tier)?$/i.test(tier?.trim() || "");
 }
 
 function requireSiteOrigin(request: Request): void {
@@ -372,31 +372,31 @@ async function requestJson(request: Request): Promise<Record<string, unknown>> {
 	}
 }
 
-async function getEulerTestSession(request: Request, env: Env): Promise<Session> {
+async function getPiTestSession(request: Request, env: Env): Promise<Session> {
 	requireSiteOrigin(request);
 	const session = await getSession(request, env);
 	if (!session) {
-		throw new HttpError(401, "Log in with Patreon to use Euler testing.");
+		throw new HttpError(401, "Log in with Patreon to use Pi testing.");
 	}
-	if (!isEulerTier(session.tier)) {
-		throw new HttpError(403, "Euler testing is available to the Euler tier only.");
+	if (!isPiTier(session.tier)) {
+		throw new HttpError(403, "Pi testing is available to the Pi tier only.");
 	}
 	return session;
 }
 
-async function enforceEulerTestInterval(
+async function enforcePiTestInterval(
 	env: Env,
 	action: "vote" | "suggestion",
 	patreonUserHash: string,
 ): Promise<void> {
 	const now = nowInSeconds();
 	const result = await env.DB.prepare(
-		`INSERT INTO euler_test_limits (patreon_user_hash, action, last_used_at)
+		`INSERT INTO pi_test_limits (patreon_user_hash, action, last_used_at)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(patreon_user_hash, action) DO UPDATE SET last_used_at = excluded.last_used_at
-		 WHERE euler_test_limits.last_used_at <= ?`,
+		 WHERE pi_test_limits.last_used_at <= ?`,
 	)
-		.bind(patreonUserHash, action, now, now - eulerTestIntervalSeconds)
+		.bind(patreonUserHash, action, now, now - piTestIntervalSeconds)
 		.run();
 	if (result.meta.changes !== 1) {
 		throw new HttpError(429, "Try again in one hour.");
@@ -404,7 +404,7 @@ async function enforceEulerTestInterval(
 }
 
 async function handleFeatureVote(request: Request, env: Env): Promise<Response> {
-	const session = await getEulerTestSession(request, env);
+	const session = await getPiTestSession(request, env);
 	const body = await requestJson(request);
 	const featureId = typeof body.featureId === "string" ? body.featureId : "";
 	const direction = body.direction;
@@ -412,7 +412,7 @@ async function handleFeatureVote(request: Request, env: Env): Promise<Response> 
 		throw new HttpError(400, "Feature or vote direction is invalid.");
 	}
 
-	await enforceEulerTestInterval(env, "vote", session.patreonUserHash);
+	await enforcePiTestInterval(env, "vote", session.patreonUserHash);
 	await env.DB.prepare(
 		"INSERT INTO feature_votes (patreon_user_hash, feature_id, direction, created_at) VALUES (?, ?, ?, ?)",
 	).bind(session.patreonUserHash, featureId, direction, nowInSeconds()).run();
@@ -420,14 +420,14 @@ async function handleFeatureVote(request: Request, env: Env): Promise<Response> 
 }
 
 async function handleFeatureSuggestion(request: Request, env: Env): Promise<Response> {
-	const session = await getEulerTestSession(request, env);
+	const session = await getPiTestSession(request, env);
 	const body = await requestJson(request);
 	const suggestion = typeof body.suggestion === "string" ? body.suggestion.trim() : "";
 	if (!suggestion || suggestion.length > 2000) {
 		throw new HttpError(400, "Feature requests must be between 1 and 2,000 characters.");
 	}
 
-	await enforceEulerTestInterval(env, "suggestion", session.patreonUserHash);
+	await enforcePiTestInterval(env, "suggestion", session.patreonUserHash);
 	await env.DB.prepare(
 		"INSERT INTO feature_suggestions (patreon_user_hash, suggestion, created_at) VALUES (?, ?, ?)",
 	).bind(session.patreonUserHash, suggestion, nowInSeconds()).run();
