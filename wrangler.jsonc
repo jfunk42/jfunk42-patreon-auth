@@ -1,0 +1,20 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "jfunk42-patreon-auth",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-17",
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"PUBLIC_SITE_ORIGIN": "https://jfunk42.com"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "jfunk42-patreon-auth",
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"migrations_dir": "migrations"
+		}
+	]
+}

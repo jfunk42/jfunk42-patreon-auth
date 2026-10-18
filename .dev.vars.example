@@ -1,0 +1,5 @@
+PATREON_CLIENT_ID=
+PATREON_CLIENT_SECRET=
+AUTH_HASH_KEY=
+# Map Patreon tier IDs to the public tier labels that jfunk42.com displays.
+# PATREON_TIER_MAP={"patreon-tier-id":"Pi"}
