@@ -461,10 +461,10 @@ export default {
 				return request.method === "POST" ? handleLogout(request, env) : methodNotAllowed(request);
 			}
 			if (url.pathname === "/api/feature-votes") {
-				return request.method === "POST" ? handleFeatureVote(request, env) : methodNotAllowed(request);
+				return request.method === "POST" ? await handleFeatureVote(request, env) : methodNotAllowed(request);
 			}
 			if (url.pathname === "/api/feature-suggestions") {
-				return request.method === "POST" ? handleFeatureSuggestion(request, env) : methodNotAllowed(request);
+				return request.method === "POST" ? await handleFeatureSuggestion(request, env) : methodNotAllowed(request);
 			}
 			return json(request, { error: "Not found." }, 404);
 		} catch (error) {
